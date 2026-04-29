@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BØFA SYSTEM - نظام الجرد</title>
+    
+    <!-- Google Fonts: Cairo -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Cairo', 'sans-serif'] },
+                    colors: {
+                        brand: { 50: '#f5f3ff', 100: '#ede9fe', 500: '#8b5cf6', 600: '#7c3aed', 800: '#5b21b6', 900: '#4c1d95' }, 
+                        accent: { 500: '#f59e0b', 600: '#d97706' } 
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- HTML5 QRCode Scanner -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <style>
+        body { font-family: 'Cairo', sans-serif; background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 4px 15px -1px rgba(0, 0, 0, 0.05);
+        }
+
+        /* --- إعدادات الطباعة والـ PDF الاحترافية --- */
+        @media print {
+            body { background-color: white !important; margin: 0; padding: 0; }
+            .print-hidden { display: none !important; }
+            .print-block { display: block !important; }
+            @page { size: A4 portrait; margin: 10mm; }
+            
+            /* إجبار المتصفح على طباعة الألوان والخلفيات */
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            
+            table { page-break-inside: auto; width: 100%; border-collapse: collapse; }
+            tr { page-break-inside: avoid; page-break-after: auto; }
+            thead { display: table-header-group; }
+            tfoot { display: table-footer-group; }
+            .page-break { page-break-before: always; }
+        }
+
+        /* قوالب الطباعة (CSS نقي لضمان دقة الطباعة) */
+        .print-template-1 table { border-collapse: collapse; width: 100%; }
+        .print-template-1 th, .print-template-1 td { border: 1px solid #000; padding: 8px; text-align: center; }
+        .print-template-1 th { background-color: #e5e7eb; font-weight: bold; }
+        
+        .print-template-2 table { border-collapse: collapse; width: 100%; font-family: 'Cairo', sans-serif; }
+        .print-template-2 th { border-bottom: 2px solid #7c3aed; padding: 10px 8px; text-align: center; color: #4c1d95; background: #f5f3ff; }
+        .print-template-2 td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: center; }
+        
+        .print-template-3 table { border-collapse: collapse; width: 100%; }
+        .print-template-3 th { background-color: #111827; color: white; padding: 10px; border: 1px solid #111827; }
+        .print-template-3 td { border: 1px solid #d1d5db; padding: 8px; text-align: center; }
+        .print-template-3 tr:nth-child(even) { background-color: #f9fafb; }
+
+        /* تأثير المعاينة في الموبايل */
+        .preview-container {
+            width: 100%;
+            overflow-x: auto;
+            background: #e2e8f0;
+            padding: 10px;
+            border-radius: 10px;
+        }
+        .preview-paper {
+            width: 210mm; /* عرض A4 */
+            min-height: 297mm;
+            background: white;
+            padding: 15mm;
+            margin: 0 auto;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            transform-origin: top center;
+        }
+        @media (max-width: 768px) {
+            .preview-paper { transform: scale(0.4); margin-bottom: -170mm; } /* تصغير في الموبايل */
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // تنبيهات SweetAlert
+        const Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 2000, timerProgressBar: true });
+
+        // ==========================================
+        // قارئ الباركود
+        // ==========================================
+        function BarcodeScannerModal({ onScan, onClose }) {
+            useEffect(() => {
+                const scanner = new Html5Qrcode("reader");
+                scanner.start({ facingMode: "environment" }, { fps: 15, qrbox: { width: 250, height: 150 } }, 
+                    (decodedText) => {
+                        if(navigator.vibrate) navigator.vibrate(200);
+                        scanner.stop().then(() => onScan(decodedText));
+                    },
+                    () => {}
+                ).catch(() => {
+                    Swal.fire({ icon: 'error', title: 'خطأ', text: 'يرجى تفعيل الكاميرا.', confirmButtonColor: '#7c3aed' });
+                    onClose();
+                });
+                return () => { if (scanner.isScanning) scanner.stop().catch(console.error); };
+            }, [onScan, onClose]);
+
+            return (
+                <div className="fixed inset-0 bg-black/90 z-50 flex flex-col justify-center items-center print-hidden">
+                    <div className="bg-white p-5 rounded-3xl w-11/12 max-w-md">
+                        <div className="flex justify-between mb-4">
+                            <h3 className="text-xl font-bold"><i className="fas fa-barcode mr-2 text-brand-600"></i> مسح الباركود</h3>
+                            <button onClick={onClose} className="text-red-500 text-2xl"><i className="fas fa-times-circle"></i></button>
+                        </div>
+                        <div id="reader" className="w-full bg-gray-100 rounded-2xl overflow-hidden border-2 border-brand-100"></div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // التطبيق الرئيسي
+        // ==========================================
+        function App() {
+            // شاشة الدخول (Splash)
+            const [showSplash, setShowSplash] = useState(true);
+
+            // الإعدادات
+            const [settings, setSettings] = useState(() => {
+                const saved = localStorage.getItem('bofa_settings');
+                return saved ? JSON.parse(saved) : { appName: 'BØFA SYSTEM', devName: 'BOFA TECH' };
+            });
+
+            // المنتجات
+            const [products, setProducts] = useState(() => {
+                const saved = localStorage.getItem('bofa_inventory');
+                return saved ? JSON.parse(saved) : [];
+            });
+
+            const [currentPage, setCurrentPage] = useState('dashboard');
+            const [isPrinting, setIsPrinting] = useState(false);
+
+            // إعدادات التقرير
+            const [reportConfig, setReportConfig] = useState({
+                title: 'تقرير الجرد الشامل',
+                company: 'اسم المحل / الشركة',
+                manager: '',
+                notes: '',
+                template: '1'
+            });
+
+            useEffect(() => {
+                // إخفاء شاشة الدخول بعد 2.5 ثانية
+                const timer = setTimeout(() => setShowSplash(false), 2500);
+                return () => clearTimeout(timer);
+            }, []);
+
+            useEffect(() => localStorage.setItem('bofa_inventory', JSON.stringify(products)), [products]);
+            useEffect(() => localStorage.setItem('bofa_settings', JSON.stringify(settings)), [settings]);
+
+            useEffect(() => {
+                if (isPrinting) {
+                    setTimeout(() => { window.print(); setIsPrinting(false); }, 800);
+                }
+            }, [isPrinting]);
+
+            // وظائف المنتجات
+            const addProduct = (newProduct) => {
+                const isExist = products.find(p => p.barcode === newProduct.barcode && p.barcode !== '');
+                if(isExist) {
+                    Swal.fire({ icon: 'warning', title: 'عذراً', text: 'الباركود مسجل مسبقاً!', confirmButtonColor: '#7c3aed' });
+                    return false;
+                }
+                const difference = newProduct.actualQty - newProduct.systemQty;
+                setProducts([...products, { ...newProduct, id: Date.now().toString(), difference }]);
+                Toast.fire({ icon: 'success', title: 'تمت الإضافة' });
+                return true;
+            };
+
+            const editProduct = (updatedProduct) => {
+                const difference = updatedProduct.actualQty - updatedProduct.systemQty;
+                setProducts(products.map(p => p.id === updatedProduct.id ? { ...updatedProduct, difference } : p));
+                Toast.fire({ icon: 'success', title: 'تم التعديل' });
+            };
+
+            const deleteProduct = (id) => {
+                Swal.fire({ title: 'تأكيد الحذف؟', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', cancelButtonColor: '#9ca3af', confirmButtonText: 'نعم، احذف', cancelButtonText: 'إلغاء' })
+                .then((result) => { if (result.isConfirmed) { setProducts(products.filter(p => p.id !== id)); Toast.fire({ icon: 'success', title: 'تم الحذف' }); } });
+            };
+
+            const updateInventory = (id, actualQty) => {
+                setProducts(products.map(p => {
+                    if (p.id === id) {
+                        const difference = actualQty - p.systemQty;
+                        return { ...p, actualQty, difference };
+                    }
+                    return p;
+                }));
+            };
+
+            // شاشة البداية
+            if (showSplash) {
+                return (
+                    <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white">
+                        <div className="text-6xl font-black mb-4 tracking-widest animate-bounce"><i className="fas fa-boxes"></i></div>
+                        <h1 className="text-4xl font-black tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-brand-400 to-accent-500">
+                            {settings.appName}
+                        </h1>
+                        <p className="text-gray-400 mt-2 text-sm tracking-widest font-mono">POWERED BY {settings.devName}</p>
+                        <div className="mt-10 w-48 h-1 bg-gray-800 rounded-full overflow-hidden">
+                            <div className="w-full h-full bg-brand-500 animate-[pulse_1.5s_ease-in-out_infinite] origin-left"></div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="h-screen bg-[#f8fafc] flex flex-col font-sans">
+                    {/* واجهة التطبيق العادية */}
+                    <div className={`print-hidden flex flex-col h-full ${isPrinting ? 'hidden' : ''}`}>
+                        
+                        {/* Header */}
+                        <header className="bg-gray-900 text-white p-5 rounded-b-3xl shadow-lg flex items-center justify-between z-10 relative">
+                            <div className="flex items-center">
+                                <div className="bg-brand-600 p-2 rounded-xl mr-3 ml-3 shadow-lg shadow-brand-500/50">
+                                    <i className="fas fa-layer-group text-xl text-white"></i>
+                                </div>
+                                <div>
+                                    <h1 className="text-xl font-black tracking-widest uppercase">{settings.appName}</h1>
+                                    <p className="text-xs text-gray-400 font-semibold">{currentPage === 'dashboard' ? 'لوحة التحكم' : currentPage === 'products' ? 'الأصناف' : currentPage === 'inventory' ? 'الجرد الميداني' : currentPage === 'reports' ? 'التقارير' : 'الإعدادات'}</p>
+                                </div>
+                            </div>
+                        </header>
+
+                        {/* Main Content */}
+                        <main className="flex-1 overflow-y-auto p-4 hide-scrollbar pb-24">
+                            {currentPage === 'dashboard' && <Dashboard setCurrentPage={setCurrentPage} products={products} />}
+                            {currentPage === 'products' && <ProductsPage products={products} addProduct={addProduct} editProduct={editProduct} deleteProduct={deleteProduct} />}
+                            {currentPage === 'inventory' && <InventoryPage products={products} updateInventory={updateInventory} />}
+                            {currentPage === 'reports' && <ReportsPage products={products} config={reportConfig} setConfig={setReportConfig} triggerPrint={() => setIsPrinting(true)} />}
+                            {currentPage === 'settings' && <SettingsPage settings={settings} setSettings={setSettings} setProducts={setProducts} />}
+                        </main>
+
+                        {/* Bottom Navigation */}
+                        <nav className="fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around p-2 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.05)] rounded-t-3xl z-40 pb-4">
+                            <NavButton icon="fa-home" label="الرئيسية" active={currentPage === 'dashboard'} onClick={() => setCurrentPage('dashboard')} />
+                            <NavButton icon="fa-box" label="الأصناف" active={currentPage === 'products'} onClick={() => setCurrentPage('products')} />
+                            
+                            <div className="relative -top-6">
+                                <button onClick={() => setCurrentPage('inventory')} className={`w-16 h-16 rounded-full flex items-center justify-center text-white shadow-xl transition-transform transform hover:scale-105 ${currentPage === 'inventory' ? 'bg-accent-500' : 'bg-gray-900'}`}>
+                                    <i className="fas fa-qrcode text-2xl"></i>
+                                </button>
+                                <span className="absolute -bottom-5 w-full text-center text-[10px] font-bold text-gray-600">جرد</span>
+                            </div>
+
+                            <NavButton icon="fa-file-pdf" label="التقارير" active={currentPage === 'reports'} onClick={() => setCurrentPage('reports')} />
+                            <NavButton icon="fa-cog" label="الإعدادات" active={currentPage === 'settings'} onClick={() => setCurrentPage('settings')} />
+                        </nav>
+                    </div>
+
+                    {/* قسم الطباعة (يظهر فقط عند التصدير) */}
+                    {isPrinting && (
+                        <div className="print-block hidden w-full bg-white" dir="rtl">
+                            <PrintDocument products={products} config={reportConfig} />
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ==========================================
+        // زر التنقل السفلي
+        // ==========================================
+        function NavButton({ icon, label, active, onClick }) {
+            return (
+                <button onClick={onClick} className={`flex flex-col items-center justify-center p-2 w-14 transition-all rounded-2xl ${active ? 'text-brand-600 scale-110' : 'text-gray-400 hover:text-gray-600'}`}>
+                    <i className={`fas ${icon} text-xl mb-1`}></i>
+                    <span className="text-[10px] font-bold">{label}</span>
+                </button>
+            );
+        }
+
+        // ==========================================
+        // 1. الرئيسية
+        // ==========================================
+        function Dashboard({ setCurrentPage, products }) {
+            const totalSystem = products.reduce((acc, p) => acc + p.systemQty, 0);
+            const totalActual = products.reduce((acc, p) => acc + p.actualQty, 0);
+            
+            return (
+                <div className="space-y-5">
+                    <div className="glass-card bg-gray-900 rounded-3xl p-6 text-white relative overflow-hidden shadow-lg">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-brand-600 rounded-full blur-3xl opacity-50 -mr-10 -mt-10"></div>
+                        <h2 className="text-xl font-bold mb-1 relative z-10">نظرة عامة</h2>
+                        <p className="text-gray-400 text-xs mb-4 relative z-10">ملخص حالة المخزون</p>
+                        
+                        <div className="grid grid-cols-2 gap-4 relative z-10">
+                            <div className="bg-white/10 p-4 rounded-2xl backdrop-blur-sm">
+                                <p className="text-gray-300 text-[10px] font-bold">إجمالي الأصناف</p>
+                                <p className="text-2xl font-black mt-1">{products.length}</p>
+                            </div>
+                            <div className="bg-white/10 p-4 rounded-2xl backdrop-blur-sm">
+                                <p className="text-gray-300 text-[10px] font-bold">الكمية المسجلة إجمالاً</p>
+                                <p className="text-2xl font-black mt-1">{totalSystem}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => setCurrentPage('products')} className="glass-card p-4 rounded-2xl text-center active:scale-95 transition border-b-4 border-brand-500">
+                            <i className="fas fa-plus-circle text-3xl text-brand-500 mb-2"></i>
+                            <h3 className="font-bold text-gray-800 text-sm">إضافة صنف</h3>
+                        </button>
+                        <button onClick={() => setCurrentPage('inventory')} className="glass-card p-4 rounded-2xl text-center active:scale-95 transition border-b-4 border-accent-500">
+                            <i className="fas fa-barcode text-3xl text-accent-500 mb-2"></i>
+                            <h3 className="font-bold text-gray-800 text-sm">بدء الجرد</h3>
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // 2. صفحة الأصناف (إضافة وتعديل)
+        // ==========================================
+        function ProductsPage({ products, addProduct, editProduct, deleteProduct }) {
+            const [isFormOpen, setIsFormOpen] = useState(false);
+            const [showScanner, setShowScanner] = useState(false);
+            const [editingProduct, setEditingProduct] = useState(null);
+
+            // نموذج الحالة
+            const [form, setForm] = useState({ name: '', barcode: '', price: '', systemQty: '', actualQty: '' });
+
+            const openAdd = () => {
+                setForm({ name: '', barcode: '', price: '', systemQty: '', actualQty: '' });
+                setEditingProduct(null);
+                setIsFormOpen(true);
+            };
+
+            const openEdit = (prod) => {
+                setForm({ name: prod.name, barcode: prod.barcode, price: prod.price, systemQty: prod.systemQty, actualQty: prod.actualQty });
+                setEditingProduct(prod);
+                setIsFormOpen(true);
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if(!form.name) return;
+                
+                const productData = {
+                    name: form.name,
+                    barcode: form.barcode || '-',
+                    price: parseFloat(form.price) || 0,
+                    systemQty: parseInt(form.systemQty) || 0,
+                    actualQty: parseInt(form.actualQty) || 0
+                };
+
+                if (editingProduct) {
+                    editProduct({ ...editingProduct, ...productData });
+                    setIsFormOpen(false);
+                } else {
+                    const success = addProduct(productData);
+                    if(success) {
+                        setForm({ name: '', barcode: '', price: '', systemQty: '', actualQty: '' });
+                        setIsFormOpen(false);
+                    }
+                }
+            };
+
+            return (
+                <div className="space-y-6 pb-6">
+                    {showScanner && <BarcodeScannerModal onScan={(code) => { setForm({...form, barcode: code}); setShowScanner(false); }} onClose={() => setShowScanner(false)} />}
+                    
+                    {!isFormOpen && (
+                        <button onClick={openAdd} className="w-full bg-brand-600 text-white font-bold py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 hover:bg-brand-700 transition">
+                            <i className="fas fa-plus"></i> إضافة قطعة جديدة
+                        </button>
+                    )}
+
+                    {isFormOpen && (
+                        <div className="glass-card p-5 rounded-3xl border border-gray-200 relative overflow-hidden">
+                            <div className={`absolute top-0 right-0 w-2 h-full ${editingProduct ? 'bg-accent-500' : 'bg-brand-500'}`}></div>
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-lg font-black text-gray-800">{editingProduct ? 'تعديل الصنف' : 'إضافة صنف جديد'}</h2>
+                                <button type="button" onClick={() => setIsFormOpen(false)} className="text-gray-400 hover:text-red-500 text-xl"><i className="fas fa-times"></i></button>
+                            </div>
+                            
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">الباركود</label>
+                                    <div className="flex gap-2">
+                                        <input type="text" value={form.barcode} onChange={(e)=>setForm({...form, barcode: e.target.value})} className="flex-1 border-2 border-gray-200 rounded-xl p-3 focus:border-brand-500 bg-gray-50 outline-none font-mono text-left" placeholder="رقم الباركود" dir="ltr" />
+                                        <button type="button" onClick={() => setShowScanner(true)} className="bg-gray-900 text-white w-12 rounded-xl flex items-center justify-center">
+                                            <i className="fas fa-camera"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">اسم القطعة / الصنف *</label>
+                                    <input type="text" value={form.name} onChange={(e)=>setForm({...form, name: e.target.value})} required className="w-full border-2 border-gray-200 rounded-xl p-3 focus:border-brand-500 bg-gray-50 outline-none font-bold" placeholder="مثال: قميص رجالي" />
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">السعر</label>
+                                    <input type="number" step="0.01" value={form.price} onChange={(e)=>setForm({...form, price: e.target.value})} className="w-full border-2 border-gray-200 rounded-xl p-3 focus:border-brand-500 bg-gray-50 outline-none" placeholder="0.00" />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3 bg-blue-50 p-3 rounded-xl border border-blue-100">
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-blue-800 mb-1">الكمية المسجلة (الدفترية)</label>
+                                        <input type="number" value={form.systemQty} onChange={(e)=>setForm({...form, systemQty: e.target.value})} className="w-full border-2 border-white rounded-lg p-2 text-center font-bold outline-none focus:border-blue-300" placeholder="0" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-green-800 mb-1">الكمية الفعلية (الجرد)</label>
+                                        <input type="number" value={form.actualQty} onChange={(e)=>setForm({...form, actualQty: e.target.value})} className="w-full border-2 border-white rounded-lg p-2 text-center font-bold outline-none focus:border-green-300" placeholder="0" />
+                                    </div>
+                                </div>
+
+                                <button type="submit" className={`w-full text-white font-bold py-4 rounded-xl mt-2 shadow-lg transition ${editingProduct ? 'bg-accent-500 hover:bg-accent-600' : 'bg-brand-600 hover:bg-brand-700'}`}>
+                                    {editingProduct ? 'حفظ التعديلات' : 'إضافة القطعة'}
+                                </button>
+                            </form>
+                        </div>
+                    )}
+
+                    <div className="mt-6">
+                        <h3 className="font-bold text-gray-800 mb-3 text-sm">قاعدة البيانات ({products.length})</h3>
+                        <div className="space-y-3">
+                            {products.length === 0 ? (
+                                <p className="text-center text-gray-400 py-6 text-sm">لا توجد أصناف</p>
+                            ) : (
+                                products.slice(0).reverse().map(product => (
+                                    <div key={product.id} className="glass-card p-3 rounded-2xl flex flex-col gap-2">
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <h4 className="font-bold text-gray-900">{product.name}</h4>
+                                                <p className="text-[10px] text-gray-500 font-mono mt-1"><i className="fas fa-barcode"></i> {product.barcode}</p>
+                                            </div>
+                                            <div className="text-left">
+                                                <span className="bg-gray-100 text-gray-800 text-[10px] px-2 py-1 rounded font-bold">سعر: {product.price}</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-between items-center border-t border-gray-100 pt-2 mt-1">
+                                            <div className="flex gap-2 text-xs font-bold">
+                                                <span className="text-blue-600 bg-blue-50 px-2 py-1 rounded">دفتري: {product.systemQty}</span>
+                                                <span className="text-green-600 bg-green-50 px-2 py-1 rounded">فعلي: {product.actualQty}</span>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => openEdit(product)} className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200">
+                                                    <i className="fas fa-edit"></i>
+                                                </button>
+                                                <button onClick={() => deleteProduct(product.id)} className="w-8 h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100">
+                                                    <i className="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // 3. الجرد الميداني
+        // ==========================================
+        function InventoryPage({ products, updateInventory }) {
+            const [search, setSearch] = useState('');
+            const [showScanner, setShowScanner] = useState(false);
+
+            const filteredProducts = useMemo(() => products.filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || p.barcode.includes(search)), [products, search]);
+
+            return (
+                <div className="space-y-4 h-full flex flex-col pb-4">
+                    {showScanner && <BarcodeScannerModal onScan={(code) => { setSearch(code); setShowScanner(false); }} onClose={() => setShowScanner(false)} />}
+
+                    <div className="glass-card p-2 rounded-2xl flex gap-2 sticky top-0 z-20">
+                        <div className="relative flex-1">
+                            <i className="fas fa-search absolute right-4 top-3.5 text-gray-400"></i>
+                            <input type="text" placeholder="ابحث أو امسح الباركود..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-gray-100 border-none rounded-xl py-3 pr-10 pl-10 focus:ring-2 focus:ring-brand-500 font-bold text-sm outline-none" />
+                            {search && <button onClick={() => setSearch('')} className="absolute left-3 top-3.5 text-gray-400 hover:text-red-500"><i className="fas fa-times-circle"></i></button>}
+                        </div>
+                        <button onClick={() => setShowScanner(true)} className="bg-gray-900 text-white px-4 rounded-xl shadow-lg">
+                            <i className="fas fa-camera text-xl"></i>
+                        </button>
+                    </div>
+
+                    <div className="flex-1 space-y-3">
+                        {filteredProducts.map(product => {
+                            const isSurplus = product.difference > 0;
+                            const isDeficit = product.difference < 0;
+                            const diffColor = isSurplus ? 'text-green-600 bg-green-50' : isDeficit ? 'text-red-600 bg-red-50' : 'text-gray-500 bg-gray-100';
+
+                            return (
+                                <div key={product.id} className="glass-card p-4 rounded-3xl relative overflow-hidden">
+                                    {(isSurplus || isDeficit) && product.actualQty > 0 && <div className={`absolute top-0 right-0 w-2 h-full ${isSurplus ? 'bg-green-500' : 'bg-red-500'}`}></div>}
+                                    
+                                    <div className="flex justify-between items-start mb-3">
+                                        <div>
+                                            <h3 className="font-black text-gray-800">{product.name}</h3>
+                                            <p className="text-[10px] text-gray-400 font-mono mt-1">{product.barcode}</p>
+                                        </div>
+                                        <div className="text-center bg-gray-100 px-3 py-1 rounded-lg">
+                                            <span className="text-[9px] font-bold block text-gray-500">النظام</span>
+                                            <span className="font-black">{product.systemQty}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-3">
+                                        <div className="flex-1 flex bg-white rounded-xl border border-gray-200 overflow-hidden shadow-inner">
+                                            <button onClick={() => updateInventory(product.id, Math.max(0, product.actualQty - 1))} className="w-12 bg-gray-50 text-gray-600 font-bold hover:bg-gray-200 active:bg-gray-300"><i className="fas fa-minus"></i></button>
+                                            <input type="number" value={product.actualQty === 0 && product.difference === -product.systemQty ? '' : product.actualQty} onChange={(e) => updateInventory(product.id, parseInt(e.target.value) || 0)} className="w-full text-center font-black text-xl text-brand-800 outline-none" placeholder="0" />
+                                            <button onClick={() => updateInventory(product.id, product.actualQty + 1)} className="w-12 bg-brand-50 text-brand-700 font-bold hover:bg-brand-100 active:bg-brand-200"><i className="fas fa-plus"></i></button>
+                                        </div>
+                                        
+                                        <div className={`flex flex-col items-center justify-center rounded-xl border min-w-[60px] ${diffColor}`}>
+                                            <span className="text-[9px] font-bold opacity-80">الفرق</span>
+                                            <span className="font-black" dir="ltr">{product.difference > 0 ? '+' : ''}{product.difference}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // 4. التقارير والطباعة
+        // ==========================================
+        function ReportsPage({ products, config, setConfig, triggerPrint }) {
+            const [showPreview, setShowPreview] = useState(false);
+
+            return (
+                <div className="space-y-6 pb-6">
+                    <div className="glass-card p-5 rounded-3xl">
+                        <h2 className="font-bold text-gray-800 mb-4 border-b pb-2"><i className="fas fa-file-invoice text-brand-600 mr-2"></i> تنسيق التقرير</h2>
+                        
+                        <div className="space-y-3">
+                            <input type="text" value={config.title} onChange={(e)=>setConfig({...config, title: e.target.value})} className="w-full border border-gray-300 rounded-xl p-3 outline-none focus:border-brand-500 font-bold text-sm" placeholder="عنوان التقرير (مثال: تقرير الجرد الشهري)" />
+                            <input type="text" value={config.company} onChange={(e)=>setConfig({...config, company: e.target.value})} className="w-full border border-gray-300 rounded-xl p-3 outline-none focus:border-brand-500 text-sm" placeholder="اسم الشركة / المحل" />
+                            <input type="text" value={config.manager} onChange={(e)=>setConfig({...config, manager: e.target.value})} className="w-full border border-gray-300 rounded-xl p-3 outline-none focus:border-brand-500 text-sm" placeholder="اسم المسؤول / المُعِد" />
+                            <input type="text" value={config.notes} onChange={(e)=>setConfig({...config, notes: e.target.value})} className="w-full border border-gray-300 rounded-xl p-3 outline-none focus:border-brand-500 text-sm" placeholder="ملاحظات أسفل التقرير (اختياري)" />
+                            
+                            <div className="mt-4">
+                                <label className="block text-xs font-bold text-gray-600 mb-2">اختر قالب الطباعة:</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button onClick={()=>setConfig({...config, template: '1'})} className={`p-2 rounded-xl text-xs font-bold border-2 transition ${config.template === '1' ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-500'}`}>كلاسيك رسمي</button>
+                                    <button onClick={()=>setConfig({...config, template: '2'})} className={`p-2 rounded-xl text-xs font-bold border-2 transition ${config.template === '2' ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-500'}`}>عصري أنيق</button>
+                                    <button onClick={()=>setConfig({...config, template: '3'})} className={`p-2 rounded-xl text-xs font-bold border-2 transition ${config.template === '3' ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-500'}`}>داكن شركات</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-6 flex gap-2">
+                            <button onClick={() => setShowPreview(!showPreview)} className="flex-1 bg-gray-200 text-gray-800 font-bold py-3 rounded-xl hover:bg-gray-300 transition text-sm">
+                                <i className={showPreview ? "fas fa-eye-slash" : "fas fa-eye"}></i> {showPreview ? 'إخفاء المعاينة' : 'معاينة حية'}
+                            </button>
+                            <button onClick={triggerPrint} className="flex-1 bg-gray-900 text-white font-black py-3 rounded-xl shadow-lg hover:bg-gray-800 transition text-sm">
+                                <i className="fas fa-print text-accent-500"></i> طباعة / PDF
+                            </button>
+                        </div>
+                    </div>
+
+                    {showPreview && (
+                        <div className="preview-container">
+                            <div className="preview-paper">
+                                <PrintDocument products={products} config={config} />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ==========================================
+        // 5. قسم الإعدادات
+        // ==========================================
+        function SettingsPage({ settings, setSettings, setProducts }) {
+            const handleClearData = () => {
+                Swal.fire({
+                    title: 'تحذير خطير!', text: 'سيتم مسح جميع المنتجات والكميات المسجلة نهائياً. لا يمكن التراجع!', icon: 'warning',
+                    showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'نعم، امسح كل شيء', cancelButtonText: 'إلغاء'
+                }).then((r) => { if(r.isConfirmed) { setProducts([]); Toast.fire({icon: 'success', title: 'تم تفريغ المنظومة'}); } });
+            };
+
+            return (
+                <div className="space-y-6 pb-6">
+                    <div className="glass-card p-5 rounded-3xl">
+                        <h2 className="font-bold text-gray-800 mb-4 border-b pb-2"><i className="fas fa-cog text-gray-500 mr-2"></i> إعدادات المنظومة</h2>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-600 mb-1">اسم المنظومة (يظهر في الشاشة الرئيسية)</label>
+                                <input type="text" value={settings.appName} onChange={(e) => setSettings({...settings, appName: e.target.value})} className="w-full border-2 border-gray-200 rounded-xl p-3 font-black text-brand-700 outline-none focus:border-brand-500 text-left" dir="ltr" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-600 mb-1">اسم المطور / المؤسس</label>
+                                <input type="text" value={settings.devName} onChange={(e) => setSettings({...settings, devName: e.target.value})} className="w-full border-2 border-gray-200 rounded-xl p-3 outline-none focus:border-brand-500 text-left" dir="ltr" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="glass-card p-5 rounded-3xl border border-red-100 bg-red-50/30">
+                        <h3 className="font-bold text-red-600 mb-2"><i className="fas fa-exclamation-triangle mr-1"></i> منطقة الخطر</h3>
+                        <p className="text-xs text-gray-600 mb-4">هذه العمليات لا يمكن التراجع عنها، يرجى الحذر.</p>
+                        <button onClick={handleClearData} className="w-full bg-red-100 text-red-600 font-bold border border-red-300 py-3 rounded-xl hover:bg-red-200 transition">
+                            <i className="fas fa-trash-alt mr-2"></i> مسح جميع بيانات المنظومة
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // مكون الطباعة (Print Document)
+        // ==========================================
+        function PrintDocument({ products, config }) {
+            const dateStr = new Date().toLocaleDateString('ar-EG');
+            const totalSys = products.reduce((sum, p) => sum + p.systemQty, 0);
+            const totalAct = products.reduce((sum, p) => sum + p.actualQty, 0);
+            const deficitVal = products.filter(p => p.difference < 0).reduce((sum, p) => sum + (Math.abs(p.difference) * p.price), 0);
+            const surplusVal = products.filter(p => p.difference > 0).reduce((sum, p) => sum + (p.difference * p.price), 0);
+
+            // اختيار الكلاس بناءً على القالب
+            const tableClass = `print-template-${config.template} mt-6 mb-6`;
+
+            return (
+                <div className="bg-white w-full text-black font-sans text-sm" dir="rtl">
+                    {/* رأس التقرير (يتغير شكله حسب القالب لكن المحتوى ثابت) */}
+                    <div className={`border-b-2 pb-4 mb-4 flex justify-between items-start ${config.template === '3' ? 'border-black' : 'border-gray-300'}`}>
+                        <div>
+                            <h1 className={`text-2xl font-black ${config.template === '2' ? 'text-brand-800' : ''}`}>{config.title || 'تقرير جرد'}</h1>
+                            <h2 className="text-lg font-bold text-gray-700 mt-1">{config.company}</h2>
+                        </div>
+                        <div className="text-left">
+                            <p className="font-bold">تاريخ التقرير: <span dir="ltr" className="font-normal">{dateStr}</span></p>
+                            {config.manager && <p className="font-bold mt-1">المُعِد: <span className="font-normal">{config.manager}</span></p>}
+                        </div>
+                    </div>
+
+                    {/* الجدول */}
+                    <div className={tableClass}>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style={{width:'5%'}}>#</th>
+                                    <th style={{width:'20%'}}>الباركود</th>
+                                    <th style={{width:'30%', textAlign:'right'}}>اسم الصنف</th>
+                                    <th style={{width:'10%'}}>السعر</th>
+                                    <th style={{width:'10%'}}>الدفتري</th>
+                                    <th style={{width:'10%'}}>الفعلي</th>
+                                    <th style={{width:'10%'}}>الفرق</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {products.length === 0 ? (
+                                    <tr><td colSpan="7" className="text-center py-4 font-bold text-gray-500">لا توجد بيانات</td></tr>
+                                ) : (
+                                    products.map((p, idx) => (
+                                        <tr key={p.id}>
+                                            <td>{idx + 1}</td>
+                                            <td style={{fontFamily:'monospace', fontSize:'12px'}}>{p.barcode}</td>
+                                            <td style={{textAlign:'right', fontWeight:'bold'}}>{p.name}</td>
+                                            <td>{p.price}</td>
+                                            <td>{p.systemQty}</td>
+                                            <td style={{fontWeight:'bold'}}>{p.actualQty}</td>
+                                            <td dir="ltr" style={{fontWeight:'bold', color: p.difference < 0 ? '#dc2626' : p.difference > 0 ? '#16a34a' : '#000'}}>
+                                                {p.difference > 0 ? '+' : ''}{p.difference}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* الملخص */}
+                    <div className="border border-gray-400 p-4 mt-8 flex justify-between bg-gray-50" style={{ pageBreakInside: 'avoid' }}>
+                        <div>
+                            <p className="mb-2"><strong>إجمالي الأصناف:</strong> {products.length}</p>
+                            <p className="mb-2"><strong>إجمالي القطع دفترياً:</strong> {totalSys}</p>
+                            <p><strong>إجمالي القطع فعلياً:</strong> {totalAct}</p>
+                        </div>
+                        <div className="text-left">
+                            <p className="mb-2 text-red-600"><strong>إجمالي قيمة العجز:</strong> <span dir="ltr">{deficitVal.toLocaleString()}</span></p>
+                            <p className="mb-2 text-green-600"><strong>إجمالي قيمة الزيادة:</strong> <span dir="ltr">{surplusVal.toLocaleString()}</span></p>
+                        </div>
+                    </div>
+
+                    {/* الملاحظات والتوقيع */}
+                    {config.notes && (
+                        <div className="mt-4 p-3 border border-dashed border-gray-400" style={{ pageBreakInside: 'avoid' }}>
+                            <strong>ملاحظات:</strong> {config.notes}
+                        </div>
+                    )}
+
+                    <div className="mt-16 flex justify-between text-center font-bold" style={{ pageBreakInside: 'avoid' }}>
+                        <div>
+                            <p>توقيع المُعِد</p>
+                            <div style={{ borderTop: '1px solid black', width: '150px', marginTop: '40px', margin:'40px auto 0' }}></div>
+                        </div>
+                        <div>
+                            <p>توقيع الإدارة / الختم</p>
+                            <div style={{ borderTop: '1px solid black', width: '150px', marginTop: '40px', margin:'40px auto 0' }}></div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
