@@ -37,6 +37,8 @@
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <!-- SweetAlert2 -->
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- html2pdf.js for smooth PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
     <style>
         body { font-family: 'Cairo', sans-serif; background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
@@ -50,14 +52,17 @@
             box-shadow: 0 4px 15px -1px rgba(0, 0, 0, 0.05);
         }
 
-        /* --- إعدادات الطباعة والـ PDF الاحترافية --- */
+        /* --- إعدادات الطباعة --- */
+        @media screen {
+            .print-only { display: none !important; }
+        }
+
         @media print {
             body { background-color: white !important; margin: 0; padding: 0; }
-            .print-hidden { display: none !important; }
-            .print-block { display: block !important; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
             @page { size: A4 portrait; margin: 10mm; }
             
-            /* إجبار المتصفح على طباعة الألوان والخلفيات */
             * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
             
             table { page-break-inside: auto; width: 100%; border-collapse: collapse; }
@@ -67,7 +72,7 @@
             .page-break { page-break-before: always; }
         }
 
-        /* قوالب الطباعة (CSS نقي لضمان دقة الطباعة) */
+        /* قوالب الطباعة */
         .print-template-1 table { border-collapse: collapse; width: 100%; }
         .print-template-1 th, .print-template-1 td { border: 1px solid #000; padding: 8px; text-align: center; }
         .print-template-1 th { background-color: #e5e7eb; font-weight: bold; }
@@ -81,7 +86,6 @@
         .print-template-3 td { border: 1px solid #d1d5db; padding: 8px; text-align: center; }
         .print-template-3 tr:nth-child(even) { background-color: #f9fafb; }
 
-        /* تأثير المعاينة في الموبايل */
         .preview-container {
             width: 100%;
             overflow-x: auto;
@@ -99,7 +103,7 @@
             transform-origin: top center;
         }
         @media (max-width: 768px) {
-            .preview-paper { transform: scale(0.4); margin-bottom: -170mm; } /* تصغير في الموبايل */
+            .preview-paper { transform: scale(0.4); margin-bottom: -170mm; } 
         }
     </style>
 </head>
@@ -109,7 +113,6 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
-        // تنبيهات SweetAlert
         const Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 2000, timerProgressBar: true });
 
         // ==========================================
@@ -132,7 +135,7 @@
             }, [onScan, onClose]);
 
             return (
-                <div className="fixed inset-0 bg-black/90 z-50 flex flex-col justify-center items-center print-hidden">
+                <div className="fixed inset-0 bg-black/90 z-50 flex flex-col justify-center items-center no-print">
                     <div className="bg-white p-5 rounded-3xl w-11/12 max-w-md">
                         <div className="flex justify-between mb-4">
                             <h3 className="text-xl font-bold"><i className="fas fa-barcode mr-2 text-brand-600"></i> مسح الباركود</h3>
@@ -148,25 +151,26 @@
         // التطبيق الرئيسي
         // ==========================================
         function App() {
-            // شاشة الدخول (Splash)
             const [showSplash, setShowSplash] = useState(true);
 
-            // الإعدادات
             const [settings, setSettings] = useState(() => {
                 const saved = localStorage.getItem('bofa_settings');
                 return saved ? JSON.parse(saved) : { appName: 'BØFA SYSTEM', devName: 'BOFA TECH' };
             });
 
-            // المنتجات
             const [products, setProducts] = useState(() => {
                 const saved = localStorage.getItem('bofa_inventory');
                 return saved ? JSON.parse(saved) : [];
             });
 
-            const [currentPage, setCurrentPage] = useState('dashboard');
-            const [isPrinting, setIsPrinting] = useState(false);
+            // الجلسات
+            const [sessions, setSessions] = useState(() => {
+                const saved = localStorage.getItem('bofa_sessions');
+                return saved ? JSON.parse(saved) : [];
+            });
 
-            // إعدادات التقرير
+            const [currentPage, setCurrentPage] = useState('dashboard');
+
             const [reportConfig, setReportConfig] = useState({
                 title: 'تقرير الجرد الشامل',
                 company: 'اسم المحل / الشركة',
@@ -176,21 +180,14 @@
             });
 
             useEffect(() => {
-                // إخفاء شاشة الدخول بعد 2.5 ثانية
                 const timer = setTimeout(() => setShowSplash(false), 2500);
                 return () => clearTimeout(timer);
             }, []);
 
             useEffect(() => localStorage.setItem('bofa_inventory', JSON.stringify(products)), [products]);
             useEffect(() => localStorage.setItem('bofa_settings', JSON.stringify(settings)), [settings]);
+            useEffect(() => localStorage.setItem('bofa_sessions', JSON.stringify(sessions)), [sessions]);
 
-            useEffect(() => {
-                if (isPrinting) {
-                    setTimeout(() => { window.print(); setIsPrinting(false); }, 800);
-                }
-            }, [isPrinting]);
-
-            // وظائف المنتجات
             const addProduct = (newProduct) => {
                 const isExist = products.find(p => p.barcode === newProduct.barcode && p.barcode !== '');
                 if(isExist) {
@@ -224,7 +221,6 @@
                 }));
             };
 
-            // شاشة البداية
             if (showSplash) {
                 return (
                     <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white">
@@ -242,10 +238,8 @@
 
             return (
                 <div className="h-screen bg-[#f8fafc] flex flex-col font-sans">
-                    {/* واجهة التطبيق العادية */}
-                    <div className={`print-hidden flex flex-col h-full ${isPrinting ? 'hidden' : ''}`}>
-                        
-                        {/* Header */}
+                    {/* واجهة التطبيق */}
+                    <div className="no-print flex flex-col h-full">
                         <header className="bg-gray-900 text-white p-5 rounded-b-3xl shadow-lg flex items-center justify-between z-10 relative">
                             <div className="flex items-center">
                                 <div className="bg-brand-600 p-2 rounded-xl mr-3 ml-3 shadow-lg shadow-brand-500/50">
@@ -258,16 +252,14 @@
                             </div>
                         </header>
 
-                        {/* Main Content */}
                         <main className="flex-1 overflow-y-auto p-4 hide-scrollbar pb-24">
                             {currentPage === 'dashboard' && <Dashboard setCurrentPage={setCurrentPage} products={products} />}
                             {currentPage === 'products' && <ProductsPage products={products} addProduct={addProduct} editProduct={editProduct} deleteProduct={deleteProduct} />}
                             {currentPage === 'inventory' && <InventoryPage products={products} updateInventory={updateInventory} />}
-                            {currentPage === 'reports' && <ReportsPage products={products} config={reportConfig} setConfig={setReportConfig} triggerPrint={() => setIsPrinting(true)} />}
-                            {currentPage === 'settings' && <SettingsPage settings={settings} setSettings={setSettings} setProducts={setProducts} />}
+                            {currentPage === 'reports' && <ReportsPage products={products} config={reportConfig} setConfig={setReportConfig} />}
+                            {currentPage === 'settings' && <SettingsPage settings={settings} setSettings={setSettings} products={products} setProducts={setProducts} sessions={sessions} setSessions={setSessions} />}
                         </main>
 
-                        {/* Bottom Navigation */}
                         <nav className="fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around p-2 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.05)] rounded-t-3xl z-40 pb-4">
                             <NavButton icon="fa-home" label="الرئيسية" active={currentPage === 'dashboard'} onClick={() => setCurrentPage('dashboard')} />
                             <NavButton icon="fa-box" label="الأصناف" active={currentPage === 'products'} onClick={() => setCurrentPage('products')} />
@@ -284,19 +276,21 @@
                         </nav>
                     </div>
 
-                    {/* قسم الطباعة (يظهر فقط عند التصدير) */}
-                    {isPrinting && (
-                        <div className="print-block hidden w-full bg-white" dir="rtl">
+                    {/* قسم الطباعة الثابت */}
+                    <div className="print-only w-full bg-white" dir="rtl">
+                        <PrintDocument products={products} config={reportConfig} />
+                    </div>
+
+                    {/* قسم مخفي لإنشاء PDF مباشرة بدون تشويه الواجهة - (تم حل مشكلة الورقة البيضاء هنا) */}
+                    <div style={{ width: 0, height: 0, overflow: 'hidden', position: 'absolute' }} className="no-print">
+                        <div id="direct-pdf-container" style={{ width: '210mm', minHeight: '297mm', backgroundColor: 'white', padding: '15mm', margin: 0 }} dir="rtl">
                             <PrintDocument products={products} config={reportConfig} />
                         </div>
-                    )}
+                    </div>
                 </div>
             );
         }
 
-        // ==========================================
-        // زر التنقل السفلي
-        // ==========================================
         function NavButton({ icon, label, active, onClick }) {
             return (
                 <button onClick={onClick} className={`flex flex-col items-center justify-center p-2 w-14 transition-all rounded-2xl ${active ? 'text-brand-600 scale-110' : 'text-gray-400 hover:text-gray-600'}`}>
@@ -347,14 +341,13 @@
         }
 
         // ==========================================
-        // 2. صفحة الأصناف (إضافة وتعديل)
+        // 2. صفحة الأصناف
         // ==========================================
         function ProductsPage({ products, addProduct, editProduct, deleteProduct }) {
             const [isFormOpen, setIsFormOpen] = useState(false);
             const [showScanner, setShowScanner] = useState(false);
             const [editingProduct, setEditingProduct] = useState(null);
 
-            // نموذج الحالة
             const [form, setForm] = useState({ name: '', barcode: '', price: '', systemQty: '', actualQty: '' });
 
             const openAdd = () => {
@@ -556,15 +549,96 @@
         }
 
         // ==========================================
-        // 4. التقارير والطباعة
+        // 4. التقارير والتصدير (PDF مباشر وإكسيل سلس)
         // ==========================================
-        function ReportsPage({ products, config, setConfig, triggerPrint }) {
+        function ReportsPage({ products, config, setConfig }) {
             const [showPreview, setShowPreview] = useState(false);
+
+            // دالة حفظ PDF تم إصلاحها لمنع الورقة البيضاء
+            const exportPDF = () => {
+                const element = document.getElementById('direct-pdf-container');
+                if(!element) {
+                    Swal.fire('خطأ', 'لم يتم العثور على محتوى التقرير', 'error');
+                    return;
+                }
+
+                Swal.fire({
+                    title: 'جاري إنشاء ملف PDF',
+                    text: 'الرجاء الانتظار قليلاً...',
+                    allowOutsideClick: false,
+                    didOpen: () => { Swal.showLoading() }
+                });
+
+                const opt = {
+                  margin:       0,
+                  filename:     `${config.title || 'تقرير_الجرد'}_${new Date().getTime()}.pdf`,
+                  image:        { type: 'jpeg', quality: 1 },
+                  html2canvas:  { scale: 2, useCORS: true, logging: false },
+                  jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                };
+
+                html2pdf().set(opt).from(element).save().then(() => {
+                    Swal.close();
+                    Toast.fire({ icon: 'success', title: 'تم تحميل ملف PDF بنجاح' });
+                }).catch(err => {
+                    console.error(err);
+                    Swal.close();
+                    Swal.fire('خطأ', 'حدث خطأ أثناء إنشاء الملف. يرجى تحديث الصفحة والمحاولة مجدداً.', 'error');
+                });
+            };
+
+            // دالة استخراج بيانات إكسيل تم تحسينها لضمان التوافقية ومنع التوقف
+            const exportExcel = () => {
+                try {
+                    let csvContent = "\uFEFF"; // لدعم الحروف العربية
+                    csvContent += "الرقم,الباركود,اسم الصنف,السعر,الدفتري,الفعلي,الفرق\n";
+
+                    products.forEach((p, idx) => {
+                        const row = [
+                            idx + 1,
+                            `"${(p.barcode || '').toString().replace(/"/g, '""')}"`,
+                            `"${(p.name || '').toString().replace(/"/g, '""')}"`,
+                            p.price || 0,
+                            p.systemQty || 0,
+                            p.actualQty || 0,
+                            p.difference || 0
+                        ];
+                        csvContent += row.join(",") + "\n";
+                    });
+
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement("a");
+                    const url = URL.createObjectURL(blob);
+                    
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", `تقرير_جرد_${new Date().toLocaleDateString('ar-EG').replace(/\//g, '-')}.csv`);
+                    link.style.visibility = 'hidden';
+                    
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    
+                    setTimeout(() => URL.revokeObjectURL(url), 100);
+                    Toast.fire({ icon: 'success', title: 'تم تحميل الإكسيل بنجاح' });
+                } catch (error) {
+                    console.error(error);
+                    Swal.fire('خطأ', 'تعذر تحميل الإكسيل، يرجى المحاولة من متصفح آخر.', 'error');
+                }
+            };
+
+            // دالة الطباعة لتجنب الأخطاء في التطبيقات الداخلية
+            const handlePrint = () => {
+                try {
+                    window.print();
+                } catch (error) {
+                    Swal.fire('خطأ', 'ميزة الطباعة غير مدعومة في هذا المتصفح', 'error');
+                }
+            };
 
             return (
                 <div className="space-y-6 pb-6">
                     <div className="glass-card p-5 rounded-3xl">
-                        <h2 className="font-bold text-gray-800 mb-4 border-b pb-2"><i className="fas fa-file-invoice text-brand-600 mr-2"></i> تنسيق التقرير</h2>
+                        <h2 className="font-bold text-gray-800 mb-4 border-b pb-2"><i className="fas fa-file-invoice text-brand-600 mr-2"></i> إعداد التقرير وتصديره</h2>
                         
                         <div className="space-y-3">
                             <input type="text" value={config.title} onChange={(e)=>setConfig({...config, title: e.target.value})} className="w-full border border-gray-300 rounded-xl p-3 outline-none focus:border-brand-500 font-bold text-sm" placeholder="عنوان التقرير (مثال: تقرير الجرد الشهري)" />
@@ -582,13 +656,22 @@
                             </div>
                         </div>
 
-                        <div className="mt-6 flex gap-2">
-                            <button onClick={() => setShowPreview(!showPreview)} className="flex-1 bg-gray-200 text-gray-800 font-bold py-3 rounded-xl hover:bg-gray-300 transition text-sm">
-                                <i className={showPreview ? "fas fa-eye-slash" : "fas fa-eye"}></i> {showPreview ? 'إخفاء المعاينة' : 'معاينة حية'}
+                        <div className="mt-6 flex flex-col gap-3">
+                            <button onClick={() => setShowPreview(!showPreview)} className="w-full bg-gray-200 text-gray-800 font-bold py-3 rounded-xl hover:bg-gray-300 transition text-sm">
+                                <i className={showPreview ? "fas fa-eye-slash" : "fas fa-eye"}></i> {showPreview ? 'إخفاء المعاينة' : 'معاينة التقرير حياً'}
                             </button>
-                            <button onClick={triggerPrint} className="flex-1 bg-gray-900 text-white font-black py-3 rounded-xl shadow-lg hover:bg-gray-800 transition text-sm">
-                                <i className="fas fa-print text-accent-500"></i> طباعة / PDF
-                            </button>
+                            
+                            <div className="grid grid-cols-3 gap-2">
+                                <button onClick={handlePrint} className="bg-brand-900 text-white font-black py-3 rounded-xl shadow-lg hover:bg-brand-800 transition flex flex-col items-center justify-center gap-1 text-xs">
+                                    <i className="fas fa-print text-lg"></i> طباعة
+                                </button>
+                                <button onClick={exportPDF} className="bg-red-600 text-white font-black py-3 rounded-xl shadow-lg hover:bg-red-500 transition flex flex-col items-center justify-center gap-1 text-xs">
+                                    <i className="fas fa-file-pdf text-lg"></i> حفظ PDF
+                                </button>
+                                <button onClick={exportExcel} className="bg-green-600 text-white font-black py-3 rounded-xl shadow-lg hover:bg-green-500 transition flex flex-col items-center justify-center gap-1 text-xs">
+                                    <i className="fas fa-file-excel text-lg"></i> إكسيل
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -604,21 +687,118 @@
         }
 
         // ==========================================
-        // 5. قسم الإعدادات
+        // 5. قسم الإعدادات (مع نظام الجلسات)
         // ==========================================
-        function SettingsPage({ settings, setSettings, setProducts }) {
+        function SettingsPage({ settings, setSettings, products, setProducts, sessions, setSessions }) {
             const handleClearData = () => {
                 Swal.fire({
-                    title: 'تحذير خطير!', text: 'سيتم مسح جميع المنتجات والكميات المسجلة نهائياً. لا يمكن التراجع!', icon: 'warning',
-                    showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'نعم، امسح كل شيء', cancelButtonText: 'إلغاء'
+                    title: 'تحذير خطير!', text: 'سيتم مسح الجرد المفتوح حالياً. (الجلسات المحفوظة لن تتأثر)', icon: 'warning',
+                    showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'نعم، امسح', cancelButtonText: 'إلغاء'
                 }).then((r) => { if(r.isConfirmed) { setProducts([]); Toast.fire({icon: 'success', title: 'تم تفريغ المنظومة'}); } });
+            };
+
+            const createNewSession = async () => {
+                if (products.length === 0) {
+                    Swal.fire({ icon: 'info', title: 'تنبيه', text: 'الجرد المفتوح فارغ حالياً، لا يوجد ما يتم حفظه.', confirmButtonColor: '#7c3aed' });
+                    return;
+                }
+
+                const { value: sessionName } = await Swal.fire({
+                    title: 'فتح جلسة جديدة',
+                    text: 'سيتم حفظ الجرد الحالي لتتمكن من الرجوع إليه لاحقاً، وبدء جرد فارغ جديد.',
+                    input: 'text',
+                    inputPlaceholder: 'أدخل اسم الجلسة (مثال: جرد الربع الأول)',
+                    showCancelButton: true,
+                    confirmButtonText: 'حفظ وبدء جلسة جديدة',
+                    cancelButtonText: 'إلغاء',
+                    confirmButtonColor: '#7c3aed',
+                    inputValidator: (value) => {
+                        if (!value) return 'يجب إدخال اسم للجلسة!';
+                    }
+                });
+
+                if (sessionName) {
+                    const newSession = {
+                        id: Date.now().toString(),
+                        name: sessionName,
+                        date: new Date().toLocaleDateString('ar-EG'),
+                        products: [...products]
+                    };
+                    setSessions([...sessions, newSession]);
+                    setProducts([]); // تفريغ الجرد لفتح جلسة جديدة
+                    Toast.fire({ icon: 'success', title: 'تم فتح جلسة جديدة بنجاح' });
+                }
+            };
+
+            const restoreSession = (session) => {
+                Swal.fire({
+                    title: 'استرجاع الجلسة؟',
+                    text: `سيتم استبدال الجرد الحالي ببيانات جلسة "${session.name}". هل أنت متأكد؟`,
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'نعم، استرجع',
+                    cancelButtonText: 'إلغاء',
+                    confirmButtonColor: '#f59e0b'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        setProducts([...session.products]);
+                        Toast.fire({ icon: 'success', title: 'تم استرجاع الجلسة' });
+                    }
+                });
+            };
+
+            const deleteSession = (id) => {
+                Swal.fire({
+                    title: 'حذف الجلسة؟', text: 'لا يمكن التراجع عن هذا الإجراء.', icon: 'error',
+                    showCancelButton: true, confirmButtonText: 'حذف', cancelButtonText: 'إلغاء', confirmButtonColor: '#ef4444'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        setSessions(sessions.filter(s => s.id !== id));
+                        Toast.fire({ icon: 'success', title: 'تم حذف الجلسة' });
+                    }
+                });
             };
 
             return (
                 <div className="space-y-6 pb-6">
+                    {/* إدارة الجلسات */}
+                    <div className="glass-card p-5 rounded-3xl">
+                        <h2 className="font-bold text-gray-800 mb-4 border-b pb-2 flex justify-between items-center">
+                            <span><i className="fas fa-folder-open text-brand-600 mr-2"></i> إدارة الجلسات</span>
+                            <span className="bg-brand-100 text-brand-800 text-[10px] px-2 py-1 rounded-lg">الآن: {products.length} صنف</span>
+                        </h2>
+                        
+                        <button onClick={createNewSession} className="w-full bg-brand-50 text-brand-700 font-bold border-2 border-brand-200 py-3 rounded-xl hover:bg-brand-100 transition mb-4 shadow-sm">
+                            <i className="fas fa-plus-circle mr-2"></i> فتح جلسة جرد جديدة
+                        </button>
+
+                        <div className="space-y-2 mt-4">
+                            <h3 className="text-xs font-bold text-gray-500">الجلسات المحفوظة ({sessions.length})</h3>
+                            {sessions.length === 0 ? (
+                                <p className="text-center text-gray-400 text-xs py-2">لا توجد جلسات محفوظة</p>
+                            ) : (
+                                sessions.map(session => (
+                                    <div key={session.id} className="flex justify-between items-center bg-gray-50 border border-gray-200 p-3 rounded-xl">
+                                        <div>
+                                            <h4 className="font-bold text-gray-800 text-sm">{session.name}</h4>
+                                            <p className="text-[10px] text-gray-500"><i className="far fa-calendar-alt"></i> {session.date} | الأصناف: {session.products.length}</p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => restoreSession(session)} className="w-8 h-8 rounded-lg bg-accent-50 text-accent-600 flex items-center justify-center hover:bg-accent-100" title="استرجاع">
+                                                <i className="fas fa-upload"></i>
+                                            </button>
+                                            <button onClick={() => deleteSession(session.id)} className="w-8 h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100" title="حذف">
+                                                <i className="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
                     <div className="glass-card p-5 rounded-3xl">
                         <h2 className="font-bold text-gray-800 mb-4 border-b pb-2"><i className="fas fa-cog text-gray-500 mr-2"></i> إعدادات المنظومة</h2>
-                        
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-xs font-bold text-gray-600 mb-1">اسم المنظومة (يظهر في الشاشة الرئيسية)</label>
@@ -633,9 +813,9 @@
 
                     <div className="glass-card p-5 rounded-3xl border border-red-100 bg-red-50/30">
                         <h3 className="font-bold text-red-600 mb-2"><i className="fas fa-exclamation-triangle mr-1"></i> منطقة الخطر</h3>
-                        <p className="text-xs text-gray-600 mb-4">هذه العمليات لا يمكن التراجع عنها، يرجى الحذر.</p>
+                        <p className="text-xs text-gray-600 mb-4">يتم تفريغ الجرد المفتوح حالياً فقط.</p>
                         <button onClick={handleClearData} className="w-full bg-red-100 text-red-600 font-bold border border-red-300 py-3 rounded-xl hover:bg-red-200 transition">
-                            <i className="fas fa-trash-alt mr-2"></i> مسح جميع بيانات المنظومة
+                            <i className="fas fa-eraser mr-2"></i> مسح بيانات الجرد الحالي
                         </button>
                     </div>
                 </div>
@@ -652,12 +832,10 @@
             const deficitVal = products.filter(p => p.difference < 0).reduce((sum, p) => sum + (Math.abs(p.difference) * p.price), 0);
             const surplusVal = products.filter(p => p.difference > 0).reduce((sum, p) => sum + (p.difference * p.price), 0);
 
-            // اختيار الكلاس بناءً على القالب
             const tableClass = `print-template-${config.template} mt-6 mb-6`;
 
             return (
                 <div className="bg-white w-full text-black font-sans text-sm" dir="rtl">
-                    {/* رأس التقرير (يتغير شكله حسب القالب لكن المحتوى ثابت) */}
                     <div className={`border-b-2 pb-4 mb-4 flex justify-between items-start ${config.template === '3' ? 'border-black' : 'border-gray-300'}`}>
                         <div>
                             <h1 className={`text-2xl font-black ${config.template === '2' ? 'text-brand-800' : ''}`}>{config.title || 'تقرير جرد'}</h1>
@@ -669,7 +847,6 @@
                         </div>
                     </div>
 
-                    {/* الجدول */}
                     <div className={tableClass}>
                         <table>
                             <thead>
@@ -705,7 +882,6 @@
                         </table>
                     </div>
 
-                    {/* الملخص */}
                     <div className="border border-gray-400 p-4 mt-8 flex justify-between bg-gray-50" style={{ pageBreakInside: 'avoid' }}>
                         <div>
                             <p className="mb-2"><strong>إجمالي الأصناف:</strong> {products.length}</p>
@@ -718,7 +894,6 @@
                         </div>
                     </div>
 
-                    {/* الملاحظات والتوقيع */}
                     {config.notes && (
                         <div className="mt-4 p-3 border border-dashed border-gray-400" style={{ pageBreakInside: 'avoid' }}>
                             <strong>ملاحظات:</strong> {config.notes}
